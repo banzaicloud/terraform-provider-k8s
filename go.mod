@@ -7,3 +7,5 @@ require (
 	github.com/hashicorp/terraform v0.12.5
 	github.com/kylelemons/godebug v1.1.0 // indirect
 )
+
+replace git.apache.org/thrift.git => github.com/apache/thrift v0.12.0

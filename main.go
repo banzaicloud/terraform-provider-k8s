@@ -10,9 +10,10 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/hashicorp/terraform/plugin"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/plugin"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 type config struct {
@@ -150,25 +151,38 @@ func resourceManifestCreate(d *schema.ResourceData, m interface{}) error {
 
 	var cmd *exec.Cmd
 
-	if isNamespace {
-		cmd = kubectl(m, kubeconfig, "apply", "-n", namespace.(string), "-f", "-")
-	} else {
-		cmd = kubectl(m, kubeconfig, "apply", "-f", "-")
-	}
-	cmd.Stdin = strings.NewReader(d.Get("content").(string))
-	if err := run(cmd); err != nil {
+	err = resource.Retry(d.Timeout(schema.TimeoutCreate), func() *resource.RetryError {
+		if isNamespace {
+			cmd = kubectl(m, kubeconfig, "apply", "-n", namespace.(string), "-f", "-")
+		} else {
+			cmd = kubectl(m, kubeconfig, "apply", "-f", "-")
+		}
+		cmd.Stdin = strings.NewReader(d.Get("content").(string))
+		if err := run(cmd); err != nil {
+			return resource.RetryableError(err)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
-	stdout := &bytes.Buffer{}
-	if isNamespace {
-		cmd = kubectl(m, kubeconfig, "get", "-o", "json", "-n", namespace.(string), "-f", "-")
-	} else {
-		cmd = kubectl(m, kubeconfig, "get", "-o", "json", "-f", "-")
-	}
-	cmd.Stdin = strings.NewReader(d.Get("content").(string))
-	cmd.Stdout = stdout
-	if err := run(cmd); err != nil {
+	var stdout *bytes.Buffer
+	err = resource.Retry(d.Timeout(schema.TimeoutCreate), func() *resource.RetryError {
+		stdout = &bytes.Buffer{}
+		if isNamespace {
+			cmd = kubectl(m, kubeconfig, "get", "-o", "json", "-n", namespace.(string), "-f", "-")
+		} else {
+			cmd = kubectl(m, kubeconfig, "get", "-o", "json", "-f", "-")
+		}
+		cmd.Stdin = strings.NewReader(d.Get("content").(string))
+		cmd.Stdout = stdout
+		if err := run(cmd); err != nil {
+			return resource.RetryableError(err)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
@@ -200,9 +214,14 @@ func resourceManifestUpdate(d *schema.ResourceData, m interface{}) error {
 	}
 	defer cleanup()
 
-	cmd := kubectl(m, kubeconfig, "apply", "-f", "-")
-	cmd.Stdin = strings.NewReader(d.Get("content").(string))
-	return run(cmd)
+	return resource.Retry(d.Timeout(schema.TimeoutUpdate), func() *resource.RetryError {
+		cmd := kubectl(m, kubeconfig, "apply", "-f", "-")
+		cmd.Stdin = strings.NewReader(d.Get("content").(string))
+		if err := run(cmd); err != nil {
+			return resource.RetryableError(err)
+		}
+		return nil
+	})
 }
 
 func resourceFromSelflink(s string) (resource, namespace string, ok bool) {
@@ -222,11 +241,11 @@ func resourceFromSelflink(s string) (resource, namespace string, ok bool) {
 }
 
 func resourceManifestDelete(d *schema.ResourceData, m interface{}) error {
-	resource, namespace, ok := resourceFromSelflink(d.Id())
+	k8sResource, namespace, ok := resourceFromSelflink(d.Id())
 	if !ok {
 		return fmt.Errorf("invalid resource id: %s", d.Id())
 	}
-	args := []string{"delete", resource}
+	args := []string{"delete", k8sResource}
 	if namespace != "" {
 		args = append(args, "-n", namespace)
 	}
@@ -236,33 +255,46 @@ func resourceManifestDelete(d *schema.ResourceData, m interface{}) error {
 	}
 	defer cleanup()
 
-	cmd := kubectl(m, kubeconfig, args...)
-	return run(cmd)
+	return resource.Retry(d.Timeout(schema.TimeoutDelete), func() *resource.RetryError {
+		cmd := kubectl(m, kubeconfig, args...)
+		if err := run(cmd); err != nil {
+			return resource.RetryableError(err)
+		}
+		return nil
+	})
 }
 
 func resourceManifestRead(d *schema.ResourceData, m interface{}) error {
-	resource, namespace, ok := resourceFromSelflink(d.Id())
+	k8sResource, namespace, ok := resourceFromSelflink(d.Id())
 	if !ok {
 		return fmt.Errorf("invalid resource id: %s", d.Id())
 	}
 
-	args := []string{"get", "--ignore-not-found", resource}
+	args := []string{"get", "--ignore-not-found", k8sResource}
 	if namespace != "" {
 		args = append(args, "-n", namespace)
 	}
 
-	stdout := &bytes.Buffer{}
+	var stdout *bytes.Buffer
 	kubeconfig, cleanup, err := kubeconfigPath(m)
 	if err != nil {
 		return fmt.Errorf("determining kubeconfig: %v", err)
 	}
 	defer cleanup()
 
-	cmd := kubectl(m, kubeconfig, args...)
-	cmd.Stdout = stdout
-	if err := run(cmd); err != nil {
+	err = resource.Retry(d.Timeout(schema.TimeoutRead), func() *resource.RetryError {
+		cmd := kubectl(m, kubeconfig, args...)
+		stdout = &bytes.Buffer{}
+		cmd.Stdout = stdout
+		if err := run(cmd); err != nil {
+			return resource.RetryableError(err)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
+
 	if strings.TrimSpace(stdout.String()) == "" {
 		d.SetId("")
 	}

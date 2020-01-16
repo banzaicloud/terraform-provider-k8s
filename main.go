@@ -20,6 +20,8 @@ type config struct {
 	kubeconfig        string
 	kubeconfigContent string
 	kubeconfigContext string
+	kubectlPath       string
+	kubectlToken      string
 }
 
 func main() {
@@ -39,6 +41,14 @@ func main() {
 						Type:     schema.TypeString,
 						Optional: true,
 					},
+					"kubectl_path": &schema.Schema{
+						Type:     schema.TypeString,
+						Optional: true,
+					},
+					"kubectl_token": &schema.Schema{
+						Type:     schema.TypeString,
+						Optional: true,
+					},
 				},
 				ResourcesMap: map[string]*schema.Resource{
 					"k8s_manifest": resourceManifest(),
@@ -48,6 +58,8 @@ func main() {
 						kubeconfig:        d.Get("kubeconfig").(string),
 						kubeconfigContent: d.Get("kubeconfig_content").(string),
 						kubeconfigContext: d.Get("kubeconfig_context").(string),
+						kubectlPath:       d.Get("kubectl_path").(string),
+						kubectlToken:      d.Get("kubectl_token").(string),
 					}, nil
 				},
 			}
@@ -133,11 +145,22 @@ func kubectl(m interface{}, kubeconfig string, args ...string) *exec.Cmd {
 	}
 
 	context := m.(*config).kubeconfigContext
+	path := m.(*config).kubectlPath
+	token := m.(*config).kubectlToken
+
+	if path == "" {
+		path = "kubectl"
+	}
+
 	if context != "" {
 		args = append([]string{"--context", context}, args...)
 	}
 
-	return exec.Command("kubectl", args...)
+	if token != "" {
+		args = append([]string{"--token", token}, args...)
+	}
+
+	return exec.Command(path, args...)
 }
 
 func resourceManifestCreate(d *schema.ResourceData, m interface{}) error {

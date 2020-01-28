@@ -86,6 +86,11 @@ func resourceManifest() *schema.Resource {
 				Required:  true,
 				Sensitive: false,
 			},
+			"validate": &schema.Schema{
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  true,
+			},
 		},
 	}
 }
@@ -171,15 +176,20 @@ func resourceManifestCreate(d *schema.ResourceData, m interface{}) error {
 	defer cleanup()
 
 	namespace, isNamespace := d.GetOk("namespace")
+	shouldValidate := d.Get("validate")
 
 	var cmd *exec.Cmd
 
 	err = resource.Retry(d.Timeout(schema.TimeoutCreate), func() *resource.RetryError {
+		args := []string{"apply", "-f", "-"}
 		if isNamespace {
-			cmd = kubectl(m, kubeconfig, "apply", "-n", namespace.(string), "-f", "-")
-		} else {
-			cmd = kubectl(m, kubeconfig, "apply", "-f", "-")
+			args = append(args, "-n", namespace.(string))
 		}
+		if !shouldValidate.(bool) {
+			args = append(args, "--validate=false")
+		}
+
+		cmd = kubectl(m, kubeconfig, args...)
 		cmd.Stdin = strings.NewReader(d.Get("content").(string))
 		if err := run(cmd); err != nil {
 			return resource.RetryableError(err)
@@ -237,8 +247,14 @@ func resourceManifestUpdate(d *schema.ResourceData, m interface{}) error {
 	}
 	defer cleanup()
 
+	shouldValidate := d.Get("validate")
+
 	return resource.Retry(d.Timeout(schema.TimeoutUpdate), func() *resource.RetryError {
-		cmd := kubectl(m, kubeconfig, "apply", "-f", "-")
+		args := []string{"apply", "-f", "-"}
+		if !shouldValidate.(bool) {
+			args = append(args, "--validate=false")
+		}
+		cmd := kubectl(m, kubeconfig, args...)
 		cmd.Stdin = strings.NewReader(d.Get("content").(string))
 		if err := run(cmd); err != nil {
 			return resource.RetryableError(err)

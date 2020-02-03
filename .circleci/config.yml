@@ -64,7 +64,12 @@ commands:
                             sleep 1
                           done
                         EOT
-
+            -   run:
+                    name: Start minikube tunnel
+                    background: true
+                    command: |
+                        sudo -E minikube tunnel
+        
     setup_go:
         description: Setup Go
         parameters:

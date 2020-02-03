@@ -3,9 +3,9 @@ module github.com/banzaicloud/terraform-provider-k8s
 go 1.13
 
 require (
-	github.com/banzaicloud/k8s-objectmatcher v1.1.0
 	github.com/hashicorp/terraform-plugin-sdk v1.4.0
 	github.com/mitchellh/go-homedir v1.1.0
+	github.com/mitchellh/mapstructure v1.1.2
 	go.uber.org/zap v1.10.0 // indirect
 	google.golang.org/grpc v1.23.1 // indirect
 	k8s.io/apimachinery v0.17.2

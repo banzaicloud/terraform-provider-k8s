@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/banzaicloud/k8s-objectmatcher/patch"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/mitchellh/mapstructure"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -42,7 +42,6 @@ func resourceK8sManifest() *schema.Resource {
 }
 
 func resourceK8sManifestCreate(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*ProviderConfig).RuntimeClient
 
 	namespace := d.Get("namespace").(string)
 	content := d.Get("content").(string)
@@ -60,15 +59,13 @@ func resourceK8sManifestCreate(d *schema.ResourceData, meta interface{}) error {
 	objectNamespace := object.GetNamespace()
 
 	if namespace == "" && objectNamespace == "" {
-		return fmt.Errorf("Missing namespace: either add namespace to the object or the resource config")
+		object.SetNamespace("default")
 	} else if objectNamespace == "" {
 		// TODO: which namespace should have a higher precedence?
 		object.SetNamespace(namespace)
 	}
 
-	if err := patch.DefaultAnnotator.SetLastAppliedAnnotation(object); err != nil {
-		return fmt.Errorf("Failed to apply annotation to object: %s", err)
-	}
+	client := meta.(*ProviderConfig).RuntimeClient
 
 	log.Printf("[INFO] Creating new manifest: %#v", object)
 	err = client.Create(context.Background(), object)
@@ -76,9 +73,83 @@ func resourceK8sManifestCreate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
+	err = waitForReadyStatus(d, client, object)
+	if err != nil {
+		return err
+	}
+
 	d.SetId(buildId(object))
 
 	return resourceK8sManifestRead(d, meta)
+}
+
+func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstructured.Unstructured) error {
+	objectKey, err := client.ObjectKeyFromObject(object)
+	if err != nil {
+		log.Printf("[DEBUG] Received error: %#v", err)
+		return err
+	}
+
+	createStateConf := &resource.StateChangeConf{
+		Pending: []string{
+			"pending",
+		},
+		Target: []string{
+			"ready",
+		},
+		Refresh: func() (interface{}, string, error) {
+			err = c.Get(context.Background(), objectKey, object)
+			if err != nil {
+				log.Printf("[DEBUG] Received error: %#v", err)
+				return nil, "error", err
+			}
+
+			log.Printf("[DEBUG] Received object: %#v", object)
+
+			if s, ok := object.Object["status"]; ok {
+				log.Printf("[DEBUG] Object has status: %#v", s)
+
+				if len(s.(map[string]interface{})) == 0 {
+					return object, "pending", nil
+				}
+
+				var status status
+				err = mapstructure.Decode(s, &status)
+				if err != nil {
+					log.Printf("[DEBUG] Received error on decode: %#v", err)
+					return nil, "error", err
+				}
+
+				if status.ReadyReplicas != nil && *status.ReadyReplicas > 0 {
+					return object, "ready", nil
+				}
+
+				if status.Phase != nil && *status.Phase == "Active" {
+					return object, "ready", nil
+				}
+
+				return object, "pending", nil
+			}
+
+			return object, "ready", nil
+		},
+		Timeout:                   d.Timeout(schema.TimeoutCreate),
+		Delay:                     5 * time.Second,
+		MinTimeout:                5 * time.Second,
+		ContinuousTargetOccurence: 1,
+	}
+
+	_, err = createStateConf.WaitForState()
+	if err != nil {
+		return fmt.Errorf("Error waiting for resource (%s) to be created: %s", d.Id(), err)
+	}
+
+	return nil
+}
+
+type status struct {
+	ReadyReplicas *int
+	Phase         *string
 }
 
 func resourceK8sManifestRead(d *schema.ResourceData, meta interface{}) error {
@@ -120,39 +191,43 @@ func resourceK8sManifestRead(d *schema.ResourceData, meta interface{}) error {
 }
 
 func resourceK8sManifestUpdate(d *schema.ResourceData, meta interface{}) error {
-	namespace, gv, kind, name, err := idParts(d.Id())
+	namespace, _, _, name, err := idParts(d.Id())
 	if err != nil {
 		return err
 	}
 
-	groupVersion, err := k8sschema.ParseGroupVersion(gv)
-	if err != nil {
-		log.Printf("[DEBUG] Invalid group version in resource ID: %#v", err)
-		return err
+	content := d.Get("content").(string)
+
+	decoder := yaml.NewYAMLOrJSONDecoder(strings.NewReader(content), 4096)
+
+	var object *unstructured.Unstructured
+
+	// TODO: add support for a list of objects?
+	err = decoder.Decode(&object)
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("Failed to unmarshal manifest: %s", err)
 	}
 
-	currentObject := &unstructured.Unstructured{}
-	currentObject.SetGroupVersionKind(groupVersion.WithKind(kind))
-	currentObject.SetNamespace(namespace)
-	currentObject.SetName(name)
+	objectNamespace := object.GetNamespace()
 
-	objectKey, err := client.ObjectKeyFromObject(currentObject)
-	if err != nil {
-		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
+	if namespace == "" && objectNamespace == "" {
+		object.SetNamespace("default")
+	} else if objectNamespace == "" {
+		// TODO: which namespace should have a higher precedence?
+		object.SetNamespace(namespace)
 	}
 
 	client := meta.(*ProviderConfig).RuntimeClient
 
-	log.Printf("[INFO] Reading object %s", name)
-	err = client.Get(context.Background(), objectKey, currentObject)
+	log.Printf("[INFO] Updating object %s", name)
+	err = client.Update(context.Background(), object)
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
 		return err
 	}
-	log.Printf("[INFO] Received object: %#v", currentObject)
+	log.Printf("[INFO] Updated object: %#v", object)
 
-	return nil
+	return waitForReadyStatus(d, client, object)
 }
 
 func resourceK8sManifestDelete(d *schema.ResourceData, meta interface{}) error {
@@ -207,10 +282,11 @@ func resourceK8sManifestDelete(d *schema.ResourceData, meta interface{}) error {
 			return currentObject, "deleting", nil
 		},
 		Timeout:                   d.Timeout(schema.TimeoutDelete),
-		Delay:                     10 * time.Second,
+		Delay:                     5 * time.Second,
 		MinTimeout:                5 * time.Second,
 		ContinuousTargetOccurence: 1,
 	}
+
 	_, err = createStateConf.WaitForState()
 	if err != nil {
 		return fmt.Errorf("Error waiting for resource (%s) to be deleted: %s", d.Id(), err)

@@ -123,51 +123,51 @@ jobs:
                     name: Run tests
                     command: go test .
 
+    integration-test-012-k8s1-16:
+        executor: minikube
+        steps:
+            -   integration:
+                    kubernetes_version: v1.16.6
+                    terraform_version: 0.12.20
+                    example_dir: examples/0.12
+
+    integration-test-012-k8s1-15:
+        executor: minikube
+        steps:
+            -   integration:
+                    kubernetes_version: v1.15.9
+                    terraform_version: 0.12.20
+                    example_dir: examples/0.12
+
     integration-test-012-k8s1-14:
         executor: minikube
         steps:
             -   integration:
-                    kubernetes_version: v1.14.2
-                    terraform_version: 0.12.8
+                    kubernetes_version: v1.14.10
+                    terraform_version: 0.12.20
                     example_dir: examples/0.12
 
-    integration-test-012-k8s1-13:
+    integration-test-pre012-k8s1-16:
         executor: minikube
         steps:
             -   integration:
-                    kubernetes_version: v1.13.6
-                    terraform_version: 0.12.8
-                    example_dir: examples/0.12
+                    kubernetes_version: v1.16.6
+                    terraform_version: 0.11.14
+                    example_dir: examples/pre0.12
 
-    integration-test-012-k8s1-12:
+    integration-test-pre012-k8s1-15:
         executor: minikube
         steps:
             -   integration:
-                    kubernetes_version: v1.12.9
-                    terraform_version: 0.12.8
-                    example_dir: examples/0.12
+                    kubernetes_version: v1.15.9
+                    terraform_version: 0.11.14
+                    example_dir: examples/pre0.12
 
     integration-test-pre012-k8s1-14:
         executor: minikube
         steps:
             -   integration:
-                    kubernetes_version: v1.14.2
-                    terraform_version: 0.11.14
-                    example_dir: examples/pre0.12
-
-    integration-test-pre012-k8s1-13:
-        executor: minikube
-        steps:
-            -   integration:
-                    kubernetes_version: v1.13.6
-                    terraform_version: 0.11.14
-                    example_dir: examples/pre0.12
-
-    integration-test-pre012-k8s1-12:
-        executor: minikube
-        steps:
-            -   integration:
-                    kubernetes_version: v1.12.9
+                    kubernetes_version: v1.14.10
                     terraform_version: 0.11.14
                     example_dir: examples/pre0.12
 

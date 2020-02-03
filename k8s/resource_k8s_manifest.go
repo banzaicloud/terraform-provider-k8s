@@ -6,9 +6,12 @@ import (
 	"io"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/banzaicloud/k8s-objectmatcher/patch"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -148,8 +151,72 @@ func resourceK8sManifestUpdate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 	log.Printf("[INFO] Received object: %#v", currentObject)
+
+	return nil
 }
 
 func resourceK8sManifestDelete(d *schema.ResourceData, meta interface{}) error {
+	namespace, gv, kind, name, err := idParts(d.Id())
+	if err != nil {
+		return err
+	}
 
+	groupVersion, err := k8sschema.ParseGroupVersion(gv)
+	if err != nil {
+		log.Printf("[DEBUG] Invalid group version in resource ID: %#v", err)
+		return err
+	}
+
+	currentObject := &unstructured.Unstructured{}
+	currentObject.SetGroupVersionKind(groupVersion.WithKind(kind))
+	currentObject.SetNamespace(namespace)
+	currentObject.SetName(name)
+
+	objectKey, err := client.ObjectKeyFromObject(currentObject)
+	if err != nil {
+		log.Printf("[DEBUG] Received error: %#v", err)
+		return err
+	}
+
+	client := meta.(*ProviderConfig).RuntimeClient
+
+	log.Printf("[INFO] Deleting object %s", name)
+	err = client.Delete(context.Background(), currentObject)
+	if err != nil {
+		log.Printf("[DEBUG] Received error: %#v", err)
+		return err
+	}
+
+	createStateConf := &resource.StateChangeConf{
+		Pending: []string{
+			"deleting",
+		},
+		Target: []string{
+			"deleted",
+		},
+		Refresh: func() (interface{}, string, error) {
+			err := client.Get(context.Background(), objectKey, currentObject)
+			if err != nil {
+				log.Printf("[INFO] error when deleting object %s: %+v", name, err)
+				if apierrors.IsNotFound(err) {
+					return currentObject, "deleted", nil
+				}
+				return nil, "error", err
+
+			}
+			return currentObject, "deleting", nil
+		},
+		Timeout:                   d.Timeout(schema.TimeoutDelete),
+		Delay:                     10 * time.Second,
+		MinTimeout:                5 * time.Second,
+		ContinuousTargetOccurence: 1,
+	}
+	_, err = createStateConf.WaitForState()
+	if err != nil {
+		return fmt.Errorf("Error waiting for resource (%s) to be deleted: %s", d.Id(), err)
+	}
+
+	log.Printf("[INFO] Deleted object: %#v", currentObject)
+
+	return nil
 }

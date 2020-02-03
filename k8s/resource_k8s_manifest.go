@@ -124,7 +124,11 @@ func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstruc
 					return object, "ready", nil
 				}
 
-				if status.Phase != nil && *status.Phase == "Active" {
+				if status.Phase != nil && (*status.Phase == "Active" || *status.Phase == "Bound") {
+					return object, "ready", nil
+				}
+
+				if status.LoadBalancer != nil && len(*status.LoadBalancer) > 0 {
 					return object, "ready", nil
 				}
 
@@ -150,6 +154,7 @@ func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstruc
 type status struct {
 	ReadyReplicas *int
 	Phase         *string
+	LoadBalancer  *map[string]interface{}
 }
 
 func resourceK8sManifestRead(d *schema.ResourceData, meta interface{}) error {

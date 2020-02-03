@@ -35,3 +35,21 @@ resource "k8s_manifest" "nginx-deployment-with-namespace" {
   content   = data.template_file.nginx-deployment.rendered
   namespace = "nginx"
 }
+
+data "template_file" "nginx-service" {
+  template = file("${path.module}/../manifests/nginx-service.yaml")
+}
+
+resource "k8s_manifest" "nginx-service" {
+  content   = data.template_file.nginx-service.rendered
+  namespace = "nginx"
+}
+
+data "template_file" "nginx-pvc" {
+  template = file("${path.module}/../manifests/nginx-pvc.yaml")
+}
+
+resource "k8s_manifest" "nginx-pvc" {
+  content   = data.template_file.nginx-pvc.rendered
+  namespace = "nginx"
+}

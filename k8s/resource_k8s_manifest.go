@@ -109,10 +109,6 @@ func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstruc
 			if s, ok := object.Object["status"]; ok {
 				log.Printf("[DEBUG] Object has status: %#v", s)
 
-				if len(s.(map[string]interface{})) == 0 {
-					return object, "pending", nil
-				}
-
 				var status status
 				err = mapstructure.Decode(s, &status)
 				if err != nil {
@@ -124,15 +120,13 @@ func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstruc
 					return object, "ready", nil
 				}
 
-				if status.Phase != nil && (*status.Phase == "Active" || *status.Phase == "Bound") {
+				if status.Phase != nil && (*status.Phase == "Active" || *status.Phase == "Bound" || *status.Phase == "Running") {
 					return object, "ready", nil
 				}
 
 				if status.LoadBalancer != nil && len(*status.LoadBalancer) > 0 {
 					return object, "ready", nil
 				}
-
-				return object, "pending", nil
 			}
 
 			return object, "ready", nil

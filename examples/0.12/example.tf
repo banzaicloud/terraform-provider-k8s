@@ -45,6 +45,15 @@ resource "k8s_manifest" "nginx-service" {
   namespace = "nginx"
 }
 
+data "template_file" "nginx-ingress" {
+  template = file("${path.module}/../manifests/nginx-ingress.yaml")
+}
+
+resource "k8s_manifest" "nginx-ingress" {
+  content   = data.template_file.nginx-ingress.rendered
+  namespace = "nginx"
+}
+
 data "template_file" "nginx-pvc" {
   template = file("${path.module}/../manifests/nginx-pvc.yaml")
 }

@@ -116,16 +116,28 @@ func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstruc
 					return nil, "error", err
 				}
 
-				if status.ReadyReplicas != nil && *status.ReadyReplicas > 0 {
-					return object, "ready", nil
+				if status.ReadyReplicas != nil {
+					if *status.ReadyReplicas > 0 {
+						return object, "ready", nil
+					}
+
+					return object, "pending", nil
 				}
 
-				if status.Phase != nil && (*status.Phase == "Active" || *status.Phase == "Bound" || *status.Phase == "Running") {
-					return object, "ready", nil
+				if status.Phase != nil {
+					if *status.Phase == "Active" || *status.Phase == "Bound" || *status.Phase == "Running" {
+						return object, "ready", nil
+					}
+
+					return object, "pending", nil
 				}
 
-				if status.LoadBalancer != nil && len(*status.LoadBalancer) > 0 {
-					return object, "ready", nil
+				if status.LoadBalancer != nil {
+					if len(*status.LoadBalancer) > 0 {
+						return object, "ready", nil
+					}
+
+					return object, "pending", nil
 				}
 			}
 

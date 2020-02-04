@@ -101,7 +101,7 @@ commands:
                 type: string
         steps:
             -   setup_minikube:
-                    minikube_version: v1.1.0
+                    minikube_version: v1.6.2
                     kubernetes_version: << parameters.kubernetes_version >>
             -   setup_go:
                     go_version: "1.13"

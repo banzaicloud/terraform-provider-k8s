@@ -7,10 +7,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
+const idSeparator = "::"
+
 func idParts(id string) (string, string, string, string, error) {
-	parts := strings.Split(id, "//")
+	parts := strings.Split(id, idSeparator)
 	if len(parts) != 4 {
-		err := fmt.Errorf("Unexpected ID format (%q), expected %q.", id, "namespace//groupVersion//kind//name")
+		err := fmt.Errorf("unexpected ID format (%q), expected %q.", id, "namespace::groupVersion::kind::name")
 		return "", "", "", "", err
 	}
 
@@ -25,7 +27,7 @@ func buildId(object *unstructured.Unstructured) string {
 			object.GroupVersionKind().Kind,
 			object.GetName(),
 		},
-		"//",
+		idSeparator,
 	)
 }
 

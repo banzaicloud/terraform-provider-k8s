@@ -24,7 +24,9 @@ func resourceK8sManifest() *schema.Resource {
 		Read:   resourceK8sManifestRead,
 		Update: resourceK8sManifestUpdate,
 		Delete: resourceK8sManifestDelete,
-
+		Importer: &schema.ResourceImporter{
+			State: resourceK8sManifestImport,
+		},
 		Schema: map[string]*schema.Schema{
 			"namespace": {
 				Type:      schema.TypeString,
@@ -306,4 +308,42 @@ func resourceK8sManifestDelete(d *schema.ResourceData, meta interface{}) error {
 	log.Printf("[INFO] Deleted object: %#v", currentObject)
 
 	return nil
+}
+
+func resourceK8sManifestImport(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+
+	namespace, gv, kind, name, err := idParts(d.Id())
+	if err != nil {
+		return nil, err
+	}
+
+	groupVersion, err := k8sschema.ParseGroupVersion(gv)
+	if err != nil {
+		log.Printf("[DEBUG] Invalid group version in resource ID: %#v", err)
+		return nil, err
+	}
+
+	object := &unstructured.Unstructured{}
+	object.SetGroupVersionKind(groupVersion.WithKind(kind))
+	object.SetNamespace(namespace)
+	object.SetName(name)
+
+	objectKey, err := client.ObjectKeyFromObject(object)
+	if err != nil {
+		log.Printf("[DEBUG] Received error: %#v", err)
+		return nil, err
+	}
+
+	client := meta.(*ProviderConfig).RuntimeClient
+
+	err = client.Get(context.Background(), objectKey, object)
+	if err != nil {
+		log.Printf("[DEBUG] Received error: %#v", err)
+		return nil, err
+	}
+
+	resource := schema.ResourceData{}
+	resource.SetId(d.Id())
+
+	return []*schema.ResourceData{&resource}, nil
 }

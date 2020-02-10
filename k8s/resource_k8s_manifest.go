@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	meta2 "k8s.io/apimachinery/pkg/api/meta"
 	"log"
 	"strings"
 	"time"
@@ -193,6 +194,17 @@ func resourceK8sManifestRead(d *schema.ResourceData, meta interface{}) error {
 	log.Printf("[INFO] Reading object %s", name)
 	err = client.Get(context.Background(), objectKey, object)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Printf("[INFO] Object missing: %#v", object)
+			d.SetId("")
+			return nil
+		}
+		if meta2.IsNoMatchError(err) {
+			log.Printf("[INFO] Object kind missing: %#v", object)
+			d.SetId("")
+			return nil
+		}
+
 		log.Printf("[DEBUG] Received error: %#v", err)
 		return err
 	}

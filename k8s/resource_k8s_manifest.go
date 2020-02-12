@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	meta2 "k8s.io/apimachinery/pkg/api/meta"
 	"log"
 	"strings"
 	"time"
+
+	meta2 "k8s.io/apimachinery/pkg/api/meta"
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
@@ -242,7 +243,23 @@ func resourceK8sManifestUpdate(d *schema.ResourceData, meta interface{}) error {
 		object.SetNamespace(namespace)
 	}
 
+	objectKey, err := client.ObjectKeyFromObject(object)
+	if err != nil {
+		log.Printf("[DEBUG] Received error: %#v", err)
+		return err
+	}
+
+	copy := object.DeepCopy()
+
 	client := meta.(*ProviderConfig).RuntimeClient
+
+	err = client.Get(context.Background(), objectKey, copy)
+	if err != nil {
+		log.Printf("[DEBUG] Received error: %#v", err)
+		return err
+	}
+
+	object.SetResourceVersion(copy.DeepCopy().GetResourceVersion())
 
 	log.Printf("[INFO] Updating object %s", name)
 	err = client.Update(context.Background(), object)

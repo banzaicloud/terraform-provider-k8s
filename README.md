@@ -1,8 +1,8 @@
 # Kubernetes Terraform Provider
 
-The k8s Terraform provider enables Terraform to deploy Kubernetes resources. Unlike the [official Kubernetes provider][kubernetes-provider] it handles raw manifests, leveraging `kubectl` directly to allow developers to work with any Kubernetes resource natively.
+The k8s Terraform provider enables Terraform to deploy Kubernetes resources. Unlike the [official Kubernetes provider][kubernetes-provider] it handles raw manifests, leveraging [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime) and the [Unstructured API](https://pkg.go.dev/github.com/kubernetes/apimachinery/pkg/apis/meta/v1/unstructured?tab=doc) directly to allow developers to work with any Kubernetes resource natively.
 
-This project is a maintained fork of [ericchiang/terraform-provider-k8s](https://github.com/ericchiang/terraform-provider-k8s).
+This project is a hard fork of [ericchiang/terraform-provider-k8s](https://github.com/ericchiang/terraform-provider-k8s).
 
 ## Installation
 
@@ -22,7 +22,7 @@ providers {
 }
 ```
 
-### The Terraform Plugin way  (enable versioning)
+### The Terraform Plugin way (enable versioning)
 
 Download a release from the [Release page](https://github.com/banzaicloud/terraform-provider-k8s/releases) and make sure the name matches the following convention:
 
@@ -42,27 +42,13 @@ Install the plugin using [Terraform Third-party Plugin Documentation](https://ww
 
 ## Usage
 
-The provider takes the following optional configuration parameters:
-
-* If you have a kubeconfig available on the file system you can configure the provider as:
+The provider uses your default Kubernetes configuration by default, but it takes some optional configuration parameters, see the [Configuration](#configuration) section (these parameters are the same as for the [Kubernetes provider](https://www.terraform.io/docs/providers/kubernetes/index.html#authentication)).
 
 ```hcl
 provider "k8s" {
-  kubeconfig = "/path/to/kubeconfig"
+  config_context = "prod-cluster"
 }
 ```
-
-* If you content of the kubeconfig is available in a variable, you can configure the provider as:
-
-```hcl
-provider "k8s" {
-  kubeconfig_content = "${var.kubeconfig}"
-}
-```
-
-**WARNING:** Configuration from the variable will be recorded into a temporary file and the file will be removed as
-soon as call is completed. This may impact performance if the code runs on a shared system because
-and the global tempdir is used.
 
 The k8s Terraform provider introduces a single Terraform resource, a `k8s_manifest`. The resource contains a `content` field, which contains a raw manifest.
 
@@ -181,5 +167,102 @@ resource "k8s_manifest" "nginx-ingress" {
   namespace = "nginx"
 }
 ```
+
+## Configuration
+
+There are generally two ways to configure the Kubernetes provider.
+
+### File config
+
+The provider always first tries to load **a config file** from a given
+(or default) location. Depending on whether you have current context set
+this _may_ require `config_context_auth_info` and/or `config_context_cluster`
+and/or `config_context`.
+
+#### Setting default config context
+
+Here's an example for how to set default context and avoid all provider configuration:
+
+```
+kubectl config set-context default-system \
+  --cluster=chosen-cluster \
+  --user=chosen-user
+
+kubectl config use-context default-system
+```
+
+Read [more about `kubectl` in the official docs](https://kubernetes.io/docs/user-guide/kubectl-overview/).
+
+### In-cluster service account token
+
+If no other configuration is specified, and when it detects it is running in a kubernetes pod,
+the provider will try to use the service account token from the `/var/run/secrets/kubernetes.io/serviceaccount/token` path.
+Detection of in-cluster execution is based on the sole availability both of the `KUBERNETES_SERVICE_HOST` and `KUBERNETES_SERVICE_PORT` environment variables,
+with non empty values.
+
+```hcl
+provider "k8s" {
+  load_config_file = "false"
+}
+```
+
+If you have any other static configuration setting specifiedin a config file or static configuration, in-cluster service account token will not be tried.
+
+### Statically defined credentials
+
+An other way is **statically** define TLS certificate credentials:
+
+```hcl
+provider "k8s" {
+  load_config_file = "false"
+
+  host = "https://104.196.242.174"
+
+  client_certificate     = "${file("~/.kube/client-cert.pem")}"
+  client_key             = "${file("~/.kube/client-key.pem")}"
+  cluster_ca_certificate = "${file("~/.kube/cluster-ca-cert.pem")}"
+}
+```
+
+or username and password (HTTP Basic Authorization):
+
+```hcl
+provider "k8s" {
+  load_config_file = "false"
+
+  host = "https://104.196.242.174"
+
+  username = "username"
+  password = "password"
+}
+```
+
+
+If you have **both** valid configuration in a config file and static configuration, the static one is used as override.
+i.e. any static field will override its counterpart loaded from the config.
+
+## Argument Reference
+
+The following arguments are supported:
+
+* `host` - (Optional) The hostname (in form of URI) of Kubernetes master. Can be sourced from `KUBE_HOST`.
+* `username` - (Optional) The username to use for HTTP basic authentication when accessing the Kubernetes master endpoint. Can be sourced from `KUBE_USER`.
+* `password` - (Optional) The password to use for HTTP basic authentication when accessing the Kubernetes master endpoint. Can be sourced from `KUBE_PASSWORD`.
+* `insecure` - (Optional) Whether server should be accessed without verifying the TLS certificate. Can be sourced from `KUBE_INSECURE`. Defaults to `false`.
+* `client_certificate` - (Optional) PEM-encoded client certificate for TLS authentication. Can be sourced from `KUBE_CLIENT_CERT_DATA`.
+* `client_key` - (Optional) PEM-encoded client certificate key for TLS authentication. Can be sourced from `KUBE_CLIENT_KEY_DATA`.
+* `cluster_ca_certificate` - (Optional) PEM-encoded root certificates bundle for TLS authentication. Can be sourced from `KUBE_CLUSTER_CA_CERT_DATA`.
+* `config_path` - (Optional) Path to the kube config file. Can be sourced from `KUBE_CONFIG` or `KUBECONFIG`. Defaults to `~/.kube/config`.
+* `config_context` - (Optional) Context to choose from the config file. Can be sourced from `KUBE_CTX`.
+* `config_context_auth_info` - (Optional) Authentication info context of the kube config (name of the kubeconfig user, `--user` flag in `kubectl`). Can be sourced from `KUBE_CTX_AUTH_INFO`.
+* `config_context_cluster` - (Optional) Cluster context of the kube config (name of the kubeconfig cluster, `--cluster` flag in `kubectl`). Can be sourced from `KUBE_CTX_CLUSTER`.
+* `token` - (Optional) Token of your service account.  Can be sourced from `KUBE_TOKEN`.
+* `load_config_file` - (Optional) By default the local config (~/.kube/config) is loaded when you use this provider. This option at false disables this behaviour which is desired when statically specifying the configuration or relying on in-cluster config. Can be sourced from `KUBE_LOAD_CONFIG_FILE`.
+* `exec` - (Optional) Configuration block to use an [exec-based credential plugin] (https://kubernetes.io/docs/reference/access-authn-authz/authentication/#client-go-credential-plugins), e.g. call an external command to receive user credentials.
+  * `api_version` - (Required) API version to use when decoding the ExecCredentials resource, e.g. `client.authentication.k8s.io/v1beta1`.
+  * `command` - (Required) Command to execute.
+  * `args` - (Optional) List of arguments to pass when executing the plugin.
+  * `env` - (Optional) Map of environment variables to set when executing the plugin.
+
 
 [kubernetes-provider]: https://www.terraform.io/docs/providers/kubernetes/index.html

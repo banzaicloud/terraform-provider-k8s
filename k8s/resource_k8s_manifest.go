@@ -8,12 +8,11 @@ import (
 	"strings"
 	"time"
 
-	meta2 "k8s.io/apimachinery/pkg/api/meta"
-
 	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/mitchellh/mapstructure"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -45,7 +44,7 @@ func resourceK8sManifest() *schema.Resource {
 	}
 }
 
-func resourceK8sManifestCreate(d *schema.ResourceData, meta interface{}) error {
+func resourceK8sManifestCreate(d *schema.ResourceData, config interface{}) error {
 
 	namespace := d.Get("namespace").(string)
 	content := d.Get("content").(string)
@@ -69,7 +68,7 @@ func resourceK8sManifestCreate(d *schema.ResourceData, meta interface{}) error {
 		object.SetNamespace(namespace)
 	}
 
-	client := meta.(*ProviderConfig).RuntimeClient
+	client := config.(*ProviderConfig).RuntimeClient
 
 	log.Printf("[INFO] Creating new manifest: %#v", object)
 	err = client.Create(context.Background(), object)
@@ -84,7 +83,7 @@ func resourceK8sManifestCreate(d *schema.ResourceData, meta interface{}) error {
 
 	d.SetId(buildId(object))
 
-	return resourceK8sManifestRead(d, meta)
+	return resourceK8sManifestRead(d, config)
 }
 
 func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstructured.Unstructured) error {
@@ -167,7 +166,7 @@ type status struct {
 	LoadBalancer  *map[string]interface{}
 }
 
-func resourceK8sManifestRead(d *schema.ResourceData, meta interface{}) error {
+func resourceK8sManifestRead(d *schema.ResourceData, config interface{}) error {
 	namespace, gv, kind, name, err := idParts(d.Id())
 	if err != nil {
 		return err
@@ -190,7 +189,7 @@ func resourceK8sManifestRead(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	client := meta.(*ProviderConfig).RuntimeClient
+	client := config.(*ProviderConfig).RuntimeClient
 
 	log.Printf("[INFO] Reading object %s", name)
 	err = client.Get(context.Background(), objectKey, object)
@@ -200,7 +199,7 @@ func resourceK8sManifestRead(d *schema.ResourceData, meta interface{}) error {
 			d.SetId("")
 			return nil
 		}
-		if meta2.IsNoMatchError(err) {
+		if meta.IsNoMatchError(err) {
 			log.Printf("[INFO] Object kind missing: %#v", object)
 			d.SetId("")
 			return nil
@@ -216,7 +215,7 @@ func resourceK8sManifestRead(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func resourceK8sManifestUpdate(d *schema.ResourceData, meta interface{}) error {
+func resourceK8sManifestUpdate(d *schema.ResourceData, config interface{}) error {
 	namespace, _, _, name, err := idParts(d.Id())
 	if err != nil {
 		return err
@@ -251,7 +250,7 @@ func resourceK8sManifestUpdate(d *schema.ResourceData, meta interface{}) error {
 
 	copy := object.DeepCopy()
 
-	client := meta.(*ProviderConfig).RuntimeClient
+	client := config.(*ProviderConfig).RuntimeClient
 
 	err = client.Get(context.Background(), objectKey, copy)
 	if err != nil {
@@ -272,7 +271,7 @@ func resourceK8sManifestUpdate(d *schema.ResourceData, meta interface{}) error {
 	return waitForReadyStatus(d, client, object)
 }
 
-func resourceK8sManifestDelete(d *schema.ResourceData, meta interface{}) error {
+func resourceK8sManifestDelete(d *schema.ResourceData, config interface{}) error {
 	namespace, gv, kind, name, err := idParts(d.Id())
 	if err != nil {
 		return err
@@ -295,7 +294,7 @@ func resourceK8sManifestDelete(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	client := meta.(*ProviderConfig).RuntimeClient
+	client := config.(*ProviderConfig).RuntimeClient
 
 	log.Printf("[INFO] Deleting object %s", name)
 	err = client.Delete(context.Background(), currentObject)
@@ -339,7 +338,7 @@ func resourceK8sManifestDelete(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func resourceK8sManifestImport(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+func resourceK8sManifestImport(d *schema.ResourceData, config interface{}) ([]*schema.ResourceData, error) {
 
 	namespace, gv, kind, name, err := idParts(d.Id())
 	if err != nil {
@@ -363,7 +362,7 @@ func resourceK8sManifestImport(d *schema.ResourceData, meta interface{}) ([]*sch
 		return nil, err
 	}
 
-	client := meta.(*ProviderConfig).RuntimeClient
+	client := config.(*ProviderConfig).RuntimeClient
 
 	err = client.Get(context.Background(), objectKey, object)
 	if err != nil {

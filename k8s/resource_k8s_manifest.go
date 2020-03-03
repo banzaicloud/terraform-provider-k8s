@@ -136,11 +136,32 @@ func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstruc
 				}
 
 				if status.LoadBalancer != nil {
-					if len(*status.LoadBalancer) > 0 {
-						return object, "ready", nil
+					// LoadBalancer status may be for an Ingress or a Service having type=LoadBalancer
+					checkLoadBalancer := true
+					if object.GetAPIVersion() == "v1" && object.GetKind() == "Service" {
+						specInterface, ok := object.Object["spec"]
+						if !ok {
+							log.Printf("[DEBUG] Received error on decode: %#v", err)
+							return nil, "error", err
+						}
+						spec, ok := specInterface.(map[string]interface{})
+						if !ok {
+							log.Printf("[DEBUG] Received error on decode: %#v", err)
+							return nil, "error", err
+						}
+						serviceType, ok := spec["type"]
+						if !ok {
+							log.Printf("[DEBUG] Received error on decode: %#v", err)
+							return nil, "error", err
+						}
+						checkLoadBalancer = serviceType == "LoadBalancer"
 					}
-
-					return object, "pending", nil
+					if checkLoadBalancer {
+						if len(*status.LoadBalancer) > 0 {
+							return object, "ready", nil
+						}
+						return object, "pending", nil
+					}
 				}
 			}
 

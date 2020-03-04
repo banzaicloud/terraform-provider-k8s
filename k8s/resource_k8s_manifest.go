@@ -13,6 +13,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -38,6 +39,11 @@ func resourceK8sManifest() *schema.Resource {
 			"content": {
 				Type:      schema.TypeString,
 				Required:  true,
+				Sensitive: false,
+			},
+			"delete_cascade": {
+				Type:      schema.TypeBool,
+				Optional:  true,
 				Sensitive: false,
 			},
 		},
@@ -315,10 +321,16 @@ func resourceK8sManifestDelete(d *schema.ResourceData, config interface{}) error
 		return err
 	}
 
+	deleteCascade := d.Get("delete_cascade").(bool)
+	deleteOptions := []client.DeleteOption{}
+	if deleteCascade {
+		deleteOptions = append(deleteOptions, client.PropagationPolicy(metav1.DeletePropagationForeground))
+	}
+
 	client := config.(*ProviderConfig).RuntimeClient
 
 	log.Printf("[INFO] Deleting object %s", name)
-	err = client.Delete(context.Background(), currentObject)
+	err = client.Delete(context.Background(), currentObject, deleteOptions...)
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
 		return err

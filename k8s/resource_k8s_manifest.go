@@ -10,6 +10,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 	"github.com/mitchellh/mapstructure"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -37,9 +38,10 @@ func resourceK8sManifest() *schema.Resource {
 				ForceNew:  true,
 			},
 			"content": {
-				Type:      schema.TypeString,
-				Required:  true,
-				Sensitive: false,
+				Type:         schema.TypeString,
+				Required:     true,
+				Sensitive:    false,
+				ValidateFunc: validation.StringIsNotEmpty,
 			},
 			"delete_cascade": {
 				Type:      schema.TypeBool,

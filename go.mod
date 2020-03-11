@@ -3,7 +3,7 @@ module github.com/banzaicloud/terraform-provider-k8s
 go 1.13
 
 require (
-	github.com/hashicorp/terraform-plugin-sdk v1.4.0
+	github.com/hashicorp/terraform-plugin-sdk v1.7.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/mitchellh/mapstructure v1.1.2
 	go.uber.org/zap v1.10.0 // indirect

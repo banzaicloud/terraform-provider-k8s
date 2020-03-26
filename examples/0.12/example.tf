@@ -62,3 +62,13 @@ resource "k8s_manifest" "nginx-pvc" {
   content   = data.template_file.nginx-pvc.rendered
   namespace = "nginx"
 }
+
+resource "k8s_manifest" "crontab-crd" {
+    content   = file("${path.module}/../manifests/crontab-crd.yaml")
+}
+
+resource "k8s_manifest" "crontab-resource" {
+    content   = file("${path.module}/../manifests/crontab-resource.yaml")
+    namespace = "nginx"
+    depends_on = [k8s_manifest.crontab-crd]
+}

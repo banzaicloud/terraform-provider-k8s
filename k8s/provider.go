@@ -11,12 +11,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 	"github.com/mitchellh/go-homedir"
-
 	_ "k8s.io/client-go/plugin/pkg/client/auth" // to import all provider auths
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
 func Provider() terraform.ResourceProvider {
@@ -230,7 +230,14 @@ func providerConfigure(d *schema.ResourceData, terraformVersion string) (interfa
 		}
 	}
 
-	c, err := client.New(cfg, client.Options{})
+	mapper, err := apiutil.NewDynamicRESTMapper(cfg, apiutil.WithLazyDiscovery)
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := client.New(cfg, client.Options{
+		Mapper: mapper,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("Failed to configure: %s", err)
 	}

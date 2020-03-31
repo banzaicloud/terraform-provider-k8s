@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -48,6 +49,11 @@ func resourceK8sManifest() *schema.Resource {
 				Optional:  true,
 				Sensitive: false,
 			},
+		},
+		Timeouts: &schema.ResourceTimeout{
+			Create:  schema.DefaultTimeout(3 * time.Minute),
+			Update:  schema.DefaultTimeout(3 * time.Minute),
+			Delete:  schema.DefaultTimeout(1 * time.Minute),
 		},
 	}
 }
@@ -84,17 +90,18 @@ func resourceK8sManifestCreate(d *schema.ResourceData, config interface{}) error
 		return err
 	}
 
-	err = waitForReadyStatus(d, client, object)
+	// this must stand before the wait to avoid losing state on error
+	d.SetId(buildId(object))
+
+	err = waitForReadyStatus(d, client, object, d.Timeout(schema.TimeoutCreate))
 	if err != nil {
 		return err
 	}
 
-	d.SetId(buildId(object))
-
 	return resourceK8sManifestRead(d, config)
 }
 
-func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstructured.Unstructured) error {
+func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstructured.Unstructured, timeout time.Duration) error {
 	objectKey, err := client.ObjectKeyFromObject(object)
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
@@ -119,6 +126,18 @@ func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstruc
 
 			if s, ok := object.Object["status"]; ok {
 				log.Printf("[DEBUG] Object has status: %#v", s)
+
+				if statusViewer, err := polymorphichelpers.StatusViewerFor(object.GetObjectKind().GroupVersionKind().GroupKind()); err == nil {
+					_, ready, err := statusViewer.Status(object, 0)
+					if err != nil {
+						return nil, "error", err
+					}
+					if ready {
+						return object, "ready", nil
+					}
+					return object, "pending", nil
+				}
+				log.Printf("[DEBUG] Object has no rollout status viewer")
 
 				var status status
 				err = mapstructure.Decode(s, &status)
@@ -175,7 +194,7 @@ func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstruc
 
 			return object, "ready", nil
 		},
-		Timeout:                   d.Timeout(schema.TimeoutCreate),
+		Timeout:                   timeout,
 		Delay:                     5 * time.Second,
 		MinTimeout:                5 * time.Second,
 		ContinuousTargetOccurence: 1,
@@ -297,7 +316,7 @@ func resourceK8sManifestUpdate(d *schema.ResourceData, config interface{}) error
 	}
 	log.Printf("[INFO] Updated object: %#v", object)
 
-	return waitForReadyStatus(d, client, object)
+	return waitForReadyStatus(d, client, object, d.Timeout(schema.TimeoutUpdate))
 }
 
 func resourceK8sManifestDelete(d *schema.ResourceData, config interface{}) error {

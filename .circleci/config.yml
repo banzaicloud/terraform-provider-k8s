@@ -69,7 +69,7 @@ commands:
                     background: true
                     command: |
                         sudo -E minikube tunnel
-        
+
     setup_go:
         description: Setup Go
         parameters:
@@ -99,6 +99,8 @@ commands:
                 type: string
             example_dir:
                 type: string
+            target:
+                type: string
         steps:
             -   setup_minikube:
                     minikube_version: v1.6.2
@@ -108,7 +110,7 @@ commands:
             - checkout
             -   run:
                     name: Run integration tests
-                    command: make TERRAFORM_VERSION=<< parameters.terraform_version >> test-integration
+                    command: make TERRAFORM_VERSION=<< parameters.terraform_version >> << parameters.target >>
                     environment:
                         EXAMPLE_DIR: << parameters.example_dir >>
 
@@ -123,6 +125,15 @@ jobs:
                     name: Run tests
                     command: go test .
 
+    integration-test-fail-k8s1-16:
+        executor: minikube
+        steps:
+            -   integration:
+                    kubernetes_version: v1.16.6
+                    terraform_version: 0.12.20
+                    example_dir: examples/fail
+                    target: test-integration-fail
+
     integration-test-012-k8s1-16:
         executor: minikube
         steps:
@@ -130,6 +141,7 @@ jobs:
                     kubernetes_version: v1.16.6
                     terraform_version: 0.12.20
                     example_dir: examples/0.12
+                    target: test-integration
 
     integration-test-012-k8s1-15:
         executor: minikube
@@ -138,6 +150,7 @@ jobs:
                     kubernetes_version: v1.15.9
                     terraform_version: 0.12.20
                     example_dir: examples/0.12
+                    target: test-integration
 
     integration-test-012-k8s1-14:
         executor: minikube
@@ -146,6 +159,7 @@ jobs:
                     kubernetes_version: v1.14.10
                     terraform_version: 0.12.20
                     example_dir: examples/0.12
+                    target: test-integration
 
     integration-test-pre012-k8s1-16:
         executor: minikube
@@ -154,6 +168,7 @@ jobs:
                     kubernetes_version: v1.16.6
                     terraform_version: 0.11.14
                     example_dir: examples/pre0.12
+                    target: test-integration
 
     integration-test-pre012-k8s1-15:
         executor: minikube
@@ -162,6 +177,7 @@ jobs:
                     kubernetes_version: v1.15.9
                     terraform_version: 0.11.14
                     example_dir: examples/pre0.12
+                    target: test-integration
 
     integration-test-pre012-k8s1-14:
         executor: minikube
@@ -170,6 +186,7 @@ jobs:
                     kubernetes_version: v1.14.10
                     terraform_version: 0.11.14
                     example_dir: examples/pre0.12
+                    target: test-integration
 
     release:
         executor: docker

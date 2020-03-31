@@ -54,15 +54,11 @@ test-integration: build bin/terraform ## Execute integration tests
 	cp build/terraform-provider-k8s .
 	bin/terraform init ${EXAMPLE_DIR}
 	bin/terraform apply -auto-approve ${EXAMPLE_DIR}
-	bin/terraform destroy -auto-approve ${EXAMPLE_DIR}
-	rm terraform-provider-k8s
+	${MAKE} test-integration-destroy
 
-.PHONY: test-integration-fail
-test-integration-fail: EXAMPLE_DIR ?= examples/fail
-test-integration-fail: build bin/terraform ## Execute integration tests
-	cp build/terraform-provider-k8s .
-	bin/terraform init ${EXAMPLE_DIR}
-	! bin/terraform apply -auto-approve ${EXAMPLE_DIR}
+.PHONY: test-integration-destroy
+test-integration-destroy: EXAMPLE_DIR ?= examples/0.12
+test-integration-destroy:
 	bin/terraform destroy -auto-approve ${EXAMPLE_DIR}
 	rm terraform-provider-k8s
 

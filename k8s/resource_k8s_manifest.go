@@ -53,7 +53,7 @@ func resourceK8sManifest() *schema.Resource {
 		Timeouts: &schema.ResourceTimeout{
 			Create:  schema.DefaultTimeout(3 * time.Minute),
 			Update:  schema.DefaultTimeout(3 * time.Minute),
-			Delete:  schema.DefaultTimeout(1 * time.Minute),
+			Delete:  schema.DefaultTimeout(3 * time.Minute),
 		},
 	}
 }

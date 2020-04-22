@@ -125,6 +125,22 @@ $ kubectl get deployments
 No resources found.
 ```
 
+Note that only manifest files with one resource are supported. If you want to deploy manifests with multiple resource definitions you can do it like this:
+
+```
+locals {
+  # depending on the line endings in your manifest file you need to change the escape sequence (\r\n for Windows, \n for Unix)
+  #                  vv   vv
+  resources = split("\n---\n",data.template_file.ngnix.rendered)
+}
+
+resource "k8s_manifest" "nginx-deployment" {
+  count = length(local.resources)
+
+  content = local.resources[count.index]
+}
+```
+
 
 ## Helm workflow
 

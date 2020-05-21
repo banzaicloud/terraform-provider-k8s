@@ -3,7 +3,6 @@ package k8s
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"strings"
 	"time"
@@ -51,9 +50,9 @@ func resourceK8sManifest() *schema.Resource {
 			},
 		},
 		Timeouts: &schema.ResourceTimeout{
-			Create:  schema.DefaultTimeout(3 * time.Minute),
-			Update:  schema.DefaultTimeout(3 * time.Minute),
-			Delete:  schema.DefaultTimeout(3 * time.Minute),
+			Create: schema.DefaultTimeout(3 * time.Minute),
+			Update: schema.DefaultTimeout(3 * time.Minute),
+			Delete: schema.DefaultTimeout(3 * time.Minute),
 		},
 	}
 }
@@ -63,14 +62,9 @@ func resourceK8sManifestCreate(d *schema.ResourceData, config interface{}) error
 	namespace := d.Get("namespace").(string)
 	content := d.Get("content").(string)
 
-	decoder := yaml.NewYAMLOrJSONDecoder(strings.NewReader(content), 4096)
-
-	var object *unstructured.Unstructured
-
-	// TODO: add support for a list of objects?
-	err := decoder.Decode(&object)
-	if err != nil && err != io.EOF {
-		return fmt.Errorf("Failed to unmarshal manifest: %s", err)
+	object, err := contentToObject(content)
+	if err != nil {
+		return err
 	}
 
 	objectNamespace := object.GetNamespace()
@@ -271,14 +265,9 @@ func resourceK8sManifestUpdate(d *schema.ResourceData, config interface{}) error
 
 	content := d.Get("content").(string)
 
-	decoder := yaml.NewYAMLOrJSONDecoder(strings.NewReader(content), 4096)
-
-	var object *unstructured.Unstructured
-
-	// TODO: add support for a list of objects?
-	err = decoder.Decode(&object)
-	if err != nil && err != io.EOF {
-		return fmt.Errorf("Failed to unmarshal manifest: %s", err)
+	object, err := contentToObject(content)
+	if err != nil {
+		return err
 	}
 
 	objectNamespace := object.GetNamespace()
@@ -428,4 +417,21 @@ func resourceK8sManifestImport(d *schema.ResourceData, config interface{}) ([]*s
 	resource.SetId(d.Id())
 
 	return []*schema.ResourceData{&resource}, nil
+}
+
+func contentToObject(content string) (*unstructured.Unstructured, error) {
+	decoder := yaml.NewYAMLOrJSONDecoder(strings.NewReader(content), 4096)
+
+	var object *unstructured.Unstructured
+
+	for {
+		err := decoder.Decode(&object)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to unmarshal manifest: %s", err)
+		}
+
+		if object != nil {
+			return object, nil
+		}
+	}
 }

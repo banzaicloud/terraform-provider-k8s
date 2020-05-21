@@ -50,7 +50,7 @@ provider "k8s" {
 }
 ```
 
-The k8s Terraform provider introduces a single Terraform resource, a `k8s_manifest`. The resource contains a `content` field, which contains a raw manifest.
+The `k8s` Terraform provider introduces a single Terraform resource, a `k8s_manifest`. The resource contains a `content` field, which contains a raw manifest in JSON or YAML format.
 
 ```hcl
 variable "replicas" {
@@ -125,6 +125,24 @@ $ kubectl get deployments
 No resources found.
 ```
 
+**NOTE**: If the YAML formatted `content` contains multiple documents (separated by `---`) only the first non-empty document is going to be parsed. This is because Terraform is mostly designed to represent a single resource on the provider side with a Terraform resource:
+
+> resource types correspond to an infrastructure object type that is managed via a remote network API
+> -- <cite>[Terraform Documentation](https://www.terraform.io/docs/configuration/resources.html)</cite>
+
+You can workaround this easily with the following snippet (however we still suggest to use separate resources):
+
+```hcl
+locals {
+  resources = split("\n---\n", data.template_file.ngnix.rendered)
+}
+
+resource "k8s_manifest" "nginx-deployment" {
+  count = length(local.resources)
+
+  content = local.resources[count.index]
+}
+```
 
 ## Helm workflow
 

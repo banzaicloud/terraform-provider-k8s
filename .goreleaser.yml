@@ -1,27 +1,48 @@
+before:
+  hooks:
+    - go mod tidy
 builds:
-    -
-        binary: terraform-provider-k8s
-        env:
-            - CGO_ENABLED=0
-        # ldflags: "-s -w -X main.version={{ .Version }} -X main.commitHash={{ .ShortCommit }} -X main.buildDate={{ .Date }}"
-        goos:
-            - linux
-            - darwin
-            - windows
-        goarch:
-            - amd64
-
-archive:
-    format_overrides:
-        -
-            goos: windows
-            format: zip
-
+- env:
+    - CGO_ENABLED=0
+  goos:
+    - freebsd
+    - windows
+    - linux
+    - darwin
+  goarch:
+    - amd64
+    - '386'
+    - arm
+    - arm64
+  ignore:
+    - goos: darwin
+      goarch: '386'
+  binary: '{{ .ProjectName }}_v{{ .Version }}'
+archives:
+- format: zip
+  name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
+  algorithm: sha256
+signs:
+  - artifacts: checksum
+    args:
+      # if you are using this is a GitHub action or some other automated pipeline, you 
+      # need to pass the batch flag to indicate its not interactive.
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}" # set this environment variable for your signing key
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+release:
+  # Visit your project's GitHub Releases page to publish this release.
+  draft: true
 changelog:
-    skip: true
-
-brew:
-    github:
+  skip: true
+brews:
+  - github:
         owner: banzaicloud
         name: homebrew-tap
     folder: Formula

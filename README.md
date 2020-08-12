@@ -282,5 +282,12 @@ The following arguments are supported:
   * `args` - (Optional) List of arguments to pass when executing the plugin.
   * `env` - (Optional) Map of environment variables to set when executing the plugin.
 
+## Release
+
+```bash
+gpg --fingerprint $MY_EMAIL
+export GPG_FINGERPRINT="THEF FING ERPR INTO OFTH  EPUB LICK EYOF YOU!"
+goreleaser release --rm-dist -p 2
+```
 
 [kubernetes-provider]: https://www.terraform.io/docs/providers/kubernetes/index.html

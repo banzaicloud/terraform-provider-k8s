@@ -42,9 +42,9 @@ release:
 changelog:
   skip: true
 brews:
-  - github:
-        owner: banzaicloud
-        name: homebrew-tap
+  - tap:
+      owner: banzaicloud
+      name: homebrew-tap
     folder: Formula
     homepage: https://banzaicloud.com/
     description: Kubernetes Terraform provider with support for raw manifests

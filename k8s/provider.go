@@ -157,26 +157,20 @@ type ProviderConfig struct {
 }
 
 func providerConfigure(d *schema.ResourceData, terraformVersion string) (interface{}, error) {
-	var cfg *restclient.Config
+	cfg := &restclient.Config{}
 	var err error
+	_, configSet := d.GetOk("host")
 	if d.Get("load_config_file").(bool) {
 		// Config file loading
 		cfg, err = tryLoadingConfigFile(d)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-	if cfg == nil {
+		if err != nil {
+			return nil, err
+		}
+	} else if !configSet {
 		// Attempt to load in-cluster config
 		cfg, err = restclient.InClusterConfig()
 		if err != nil {
-			// Fallback to standard config if we are not running inside a cluster
-			if err == restclient.ErrNotInCluster {
-				cfg = &restclient.Config{}
-			} else {
-				return nil, fmt.Errorf("Failed to configure: %s", err)
-			}
+			return nil, fmt.Errorf("Failed to configure: %s", err)
 		}
 	}
 

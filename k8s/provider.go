@@ -170,7 +170,12 @@ func providerConfigure(d *schema.ResourceData, terraformVersion string) (interfa
 		// Attempt to load in-cluster config
 		cfg, err = restclient.InClusterConfig()
 		if err != nil {
-			return nil, fmt.Errorf("Failed to configure: %s", err)
+			// Fallback to standard config if we are not running inside a cluster
+			if err == restclient.ErrNotInCluster {
+				cfg = &restclient.Config{}
+			} else {
+				return nil, fmt.Errorf("Failed to configure: %s", err)
+			}
 		}
 	}
 

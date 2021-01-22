@@ -258,54 +258,62 @@ func resourceK8sManifestRead(d *schema.ResourceData, config interface{}) error {
 }
 
 func resourceK8sManifestUpdate(d *schema.ResourceData, config interface{}) error {
-	namespace, _, _, name, err := idParts(d.Id())
+	namespace, _, _, _, err := idParts(d.Id())
 	if err != nil {
 		return err
 	}
 
-	content := d.Get("content").(string)
+	originalData, newData := d.GetChange("content")
 
-	object, err := contentToObject(content)
+	log.Printf("[DEBUG] Original vs modified: %s %s", originalData, newData)
+
+	modified, err := contentToObject(newData.(string))
 	if err != nil {
 		return err
 	}
 
-	objectNamespace := object.GetNamespace()
+	original, err := contentToObject(originalData.(string))
+	if err != nil {
+		return err
+	}
+
+	objectNamespace := modified.GetNamespace()
 
 	if namespace == "" && objectNamespace == "" {
-		object.SetNamespace("default")
+		modified.SetNamespace("default")
 	} else if objectNamespace == "" {
 		// TODO: which namespace should have a higher precedence?
-		object.SetNamespace(namespace)
+		modified.SetNamespace(namespace)
 	}
 
-	objectKey, err := client.ObjectKeyFromObject(object)
+	objectKey, err := client.ObjectKeyFromObject(modified)
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
 		return err
 	}
 
-	copy := object.DeepCopy()
+	current := modified.DeepCopy()
 
 	client := config.(*ProviderConfig).RuntimeClient
 
-	err = client.Get(context.Background(), objectKey, copy)
+	err = client.Get(context.Background(), objectKey, current)
 	if err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
 		return err
 	}
 
-	object.SetResourceVersion(copy.DeepCopy().GetResourceVersion())
+	modified.SetResourceVersion(current.DeepCopy().GetResourceVersion())
 
-	log.Printf("[INFO] Updating object %s", name)
-	err = client.Update(context.Background(), object)
-	if err != nil {
+	current.SetResourceVersion("")
+	original.SetResourceVersion("")
+
+	if err := patch(config.(*ProviderConfig).RuntimeClient, modified, original, current); err != nil {
 		log.Printf("[DEBUG] Received error: %#v", err)
 		return err
 	}
-	log.Printf("[INFO] Updated object: %#v", object)
+	log.Printf("[INFO] Updated object: %#v", modified)
 
-	return waitForReadyStatus(d, client, object, d.Timeout(schema.TimeoutUpdate))
+	return waitForReadyStatus(d, client, modified, d.Timeout(schema.TimeoutUpdate))
 }
 
 func resourceK8sManifestDelete(d *schema.ResourceData, config interface{}) error {
@@ -435,3 +443,4 @@ func contentToObject(content string) (*unstructured.Unstructured, error) {
 		}
 	}
 }
+

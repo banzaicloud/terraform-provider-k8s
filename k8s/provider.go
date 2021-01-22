@@ -241,7 +241,9 @@ func providerConfigure(d *schema.ResourceData, terraformVersion string) (interfa
 		return nil, fmt.Errorf("Failed to configure: %s", err)
 	}
 
-	return &ProviderConfig{c}, nil
+	return &ProviderConfig{
+		RuntimeClient: c,
+	}, nil
 }
 
 func tryLoadingConfigFile(d *schema.ResourceData) (*restclient.Config, error) {

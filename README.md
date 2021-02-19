@@ -143,7 +143,7 @@ You can workaround this easily with the following snippet (however we still sugg
 
 ```hcl
 locals {
-  resources = split("\n---\n", data.template_file.ngnix.rendered)
+  resources = split("\n---\n", data.template_file.nginx.rendered)
 }
 
 resource "k8s_manifest" "nginx-deployment" {

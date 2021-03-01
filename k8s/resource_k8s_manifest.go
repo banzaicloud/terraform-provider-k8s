@@ -21,6 +21,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const yamlSeperator = "---"
+
 func resourceK8sManifest() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceK8sManifestCreate,
@@ -62,37 +64,44 @@ func resourceK8sManifestCreate(d *schema.ResourceData, config interface{}) error
 	namespace := d.Get("namespace").(string)
 	content := d.Get("content").(string)
 
-	object, err := contentToObject(content)
+	objects, err := contentToObject(content)
 	if err != nil {
 		return err
 	}
 
-	objectNamespace := object.GetNamespace()
+	for _, object := range objects {
+		objectNamespace := object.GetNamespace()
 
-	if namespace == "" && objectNamespace == "" {
-		object.SetNamespace("default")
-	} else if objectNamespace == "" {
-		// TODO: which namespace should have a higher precedence?
-		object.SetNamespace(namespace)
+		if namespace == "" && objectNamespace == "" {
+			object.SetNamespace("default")
+		} else if objectNamespace == "" {
+			// TODO: which namespace should have a higher precedence?
+			object.SetNamespace(namespace)
+		}
+
+		client := config.(*ProviderConfig).RuntimeClient
+
+		log.Printf("[INFO] Creating new manifest: %#v", object)
+		err = client.Create(context.Background(), object)
+		if err != nil {
+			return err
+		}
+
+		// this must stand before the wait to avoid losing state on error
+		d.SetId(buildId(object))
+
+		err = waitForReadyStatus(d, client, object, d.Timeout(schema.TimeoutCreate))
+		if err != nil {
+			return err
+		}
+
+		err = resourceK8sManifestRead(d, config)
+		if err != nil {
+			return err
+		}
 	}
 
-	client := config.(*ProviderConfig).RuntimeClient
-
-	log.Printf("[INFO] Creating new manifest: %#v", object)
-	err = client.Create(context.Background(), object)
-	if err != nil {
-		return err
-	}
-
-	// this must stand before the wait to avoid losing state on error
-	d.SetId(buildId(object))
-
-	err = waitForReadyStatus(d, client, object, d.Timeout(schema.TimeoutCreate))
-	if err != nil {
-		return err
-	}
-
-	return resourceK8sManifestRead(d, config)
+	return nil
 }
 
 func waitForReadyStatus(d *schema.ResourceData, c client.Client, object *unstructured.Unstructured, timeout time.Duration) error {
@@ -267,53 +276,78 @@ func resourceK8sManifestUpdate(d *schema.ResourceData, config interface{}) error
 
 	log.Printf("[DEBUG] Original vs modified: %s %s", originalData, newData)
 
-	modified, err := contentToObject(newData.(string))
+	modifiedResources, err := contentToObject(newData.(string))
 	if err != nil {
 		return err
 	}
 
-	original, err := contentToObject(originalData.(string))
+	originalResources, err := contentToObject(originalData.(string))
 	if err != nil {
 		return err
 	}
 
-	objectNamespace := modified.GetNamespace()
+	for _, modified := range modifiedResources {
+		objectKind := modified.GetKind()
+		objectNamespace := modified.GetNamespace()
+		objectName := modified.GetName()
 
-	if namespace == "" && objectNamespace == "" {
-		modified.SetNamespace("default")
-	} else if objectNamespace == "" {
-		// TODO: which namespace should have a higher precedence?
-		modified.SetNamespace(namespace)
+		original := findOriginalResource(originalResources, objectKind, objectNamespace, objectName)
+
+		if namespace == "" && objectNamespace == "" {
+			modified.SetNamespace("default")
+		} else if objectNamespace == "" {
+			// TODO: which namespace should have a higher precedence?
+			modified.SetNamespace(namespace)
+		}
+
+		objectKey, err := client.ObjectKeyFromObject(modified)
+		if err != nil {
+			log.Printf("[DEBUG] Received error: %#v", err)
+			return err
+		}
+
+		current := modified.DeepCopy()
+
+		client := config.(*ProviderConfig).RuntimeClient
+
+		err = client.Get(context.Background(), objectKey, current)
+		if err != nil {
+			log.Printf("[DEBUG] Received error: %#v", err)
+			return err
+		}
+
+		modified.SetResourceVersion(current.DeepCopy().GetResourceVersion())
+
+		current.SetResourceVersion("")
+		original.SetResourceVersion("")
+
+		if err := patch(config.(*ProviderConfig).RuntimeClient, modified, original, current); err != nil {
+			log.Printf("[DEBUG] Received error: %#v", err)
+			return err
+		}
+		log.Printf("[INFO] Updated object: %#v", modified)
+
+		err = waitForReadyStatus(d, client, modified, d.Timeout(schema.TimeoutUpdate))
+		if err != nil {
+			return err
+		}
+
 	}
+	return nil
+}
 
-	objectKey, err := client.ObjectKeyFromObject(modified)
-	if err != nil {
-		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
+func findOriginalResource(originalObjects []*unstructured.Unstructured, kind, namespace, name string) *unstructured.Unstructured {
+	for _, obj := range originalObjects {
+		resource := obj
+		objectKind := resource.GetKind()
+		objectNamespace := resource.GetNamespace()
+		objectName := resource.GetName()
+
+		if objectKind == kind && objectNamespace == namespace && objectName == name {
+			return resource
+		}
 	}
-
-	current := modified.DeepCopy()
-
-	client := config.(*ProviderConfig).RuntimeClient
-
-	err = client.Get(context.Background(), objectKey, current)
-	if err != nil {
-		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
-	}
-
-	modified.SetResourceVersion(current.DeepCopy().GetResourceVersion())
-
-	current.SetResourceVersion("")
-	original.SetResourceVersion("")
-
-	if err := patch(config.(*ProviderConfig).RuntimeClient, modified, original, current); err != nil {
-		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
-	}
-	log.Printf("[INFO] Updated object: %#v", modified)
-
-	return waitForReadyStatus(d, client, modified, d.Timeout(schema.TimeoutUpdate))
+	return nil
 }
 
 func resourceK8sManifestDelete(d *schema.ResourceData, config interface{}) error {
@@ -427,11 +461,22 @@ func resourceK8sManifestImport(d *schema.ResourceData, config interface{}) ([]*s
 	return []*schema.ResourceData{&resource}, nil
 }
 
-func contentToObject(content string) (*unstructured.Unstructured, error) {
+func contentToObject(content string) ([]*unstructured.Unstructured, error) {
+	objects := make([]*unstructured.Unstructured, 0)
+	//yaml seperator will be present in yaml files and this change shouldn't affect json resource content
+	for _, manifest := range strings.Split(content, yamlSeperator) {
+		if obj, err := manifestToObject(manifest); err != nil {
+			return nil, err
+		} else {
+			objects = append(objects, obj)
+		}
+	}
+	return objects, nil
+}
+
+func manifestToObject(content string) (*unstructured.Unstructured, error) {
 	decoder := yaml.NewYAMLOrJSONDecoder(strings.NewReader(content), 4096)
-
 	var object *unstructured.Unstructured
-
 	for {
 		err := decoder.Decode(&object)
 		if err != nil {
@@ -443,4 +488,3 @@ func contentToObject(content string) (*unstructured.Unstructured, error) {
 		}
 	}
 }
-

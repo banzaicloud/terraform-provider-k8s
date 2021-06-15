@@ -53,6 +53,7 @@ The following arguments are supported:
 
 * `content` - (Required) Content defines the specification of manifest in YAML (or JSON format).
 * `namespace` - (Optional) Namespace defines the namespace of the resource to be created if not defined in the `content`.
+* `ignore_field` - (Optional) List of jq style path you don't want to update in your manifest.
 
 
 ## Import

@@ -2,7 +2,9 @@ package k8s
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/itchyny/gojq"
 	"log"
 	"strings"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 	"github.com/mitchellh/mapstructure"
+	goyaml "gopkg.in/yaml.v2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,6 +45,16 @@ func resourceK8sManifest() *schema.Resource {
 				Required:     true,
 				Sensitive:    false,
 				ValidateFunc: validation.StringIsNotEmpty,
+			},
+			"override_content": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"ignore_fields": {
+				Type:        schema.TypeList,
+				Elem:        &schema.Schema{Type: schema.TypeString},
+				Description: "List of jq style path you don't want to update.",
+				Optional:    true,
 			},
 			"delete_cascade": {
 				Type:      schema.TypeBool,
@@ -252,68 +265,108 @@ func resourceK8sManifestRead(d *schema.ResourceData, config interface{}) error {
 	}
 	log.Printf("[INFO] Received object: %#v", object)
 
+	ignoreFields, hasIgnoreFields := d.GetOk("ignore_fields")
+	if hasIgnoreFields {
+		content := d.Get("content").(string)
+		contentModified, err := excludeIgnoreFields(ignoreFields, content)
+		if err != nil {
+			return err
+		}
+
+		contentYaml, err := json2Yaml(contentModified)
+		if err != nil {
+			return err
+		}
+
+		d.Set("override_content", contentYaml)
+	}
+
 	// TODO: save metadata in terraform state
 
 	return nil
 }
 
 func resourceK8sManifestUpdate(d *schema.ResourceData, config interface{}) error {
+	var originalData string
+	var newData string
+
 	namespace, _, _, _, err := idParts(d.Id())
 	if err != nil {
 		return err
 	}
 
-	originalData, newData := d.GetChange("content")
+	if d.HasChanges("content", "ignore_fields") {
+		//originalDataRaw, newDataRaw := d.GetChange("content")
+		newDataRaw := d.Get("content")
+		originalDataRaw := d.Get("override_content")
 
-	log.Printf("[DEBUG] Original vs modified: %s %s", originalData, newData)
+		ignoreFields, hasIgnoreFields := d.GetOk("ignore_fields")
+		if hasIgnoreFields {
+			originalData, err = excludeIgnoreFields(ignoreFields, originalDataRaw.(string))
+			if err != nil {
+				return err
+			}
 
-	modified, err := contentToObject(newData.(string))
-	if err != nil {
-		return err
+			newData, err = excludeIgnoreFields(ignoreFields, newDataRaw.(string))
+			if err != nil {
+				return err
+			}
+		}
+
+		log.Printf("[DEBUG] Original vs modified: %s %s", originalData, newData)
+		modified, err := contentToObject(newData)
+		if err != nil {
+			return err
+		}
+
+		original, err := contentToObject(originalData)
+		if err != nil {
+			return err
+		}
+
+		objectNamespace := modified.GetNamespace()
+
+		if namespace == "" && objectNamespace == "" {
+			modified.SetNamespace("default")
+		} else if objectNamespace == "" {
+			// TODO: which namespace should have a higher precedence?
+			modified.SetNamespace(namespace)
+		}
+
+		objectKey, err := client.ObjectKeyFromObject(modified)
+		if err != nil {
+			log.Printf("[DEBUG] Received error: %#v", err)
+			return err
+		}
+
+		current := modified.DeepCopy()
+
+		client := config.(*ProviderConfig).RuntimeClient
+
+		err = client.Get(context.Background(), objectKey, current)
+		if err != nil {
+			log.Printf("[DEBUG] Received error: %#v", err)
+			return err
+		}
+
+		modified.SetResourceVersion(current.DeepCopy().GetResourceVersion())
+
+		current.SetResourceVersion("")
+		original.SetResourceVersion("")
+
+		if err := patch(config.(*ProviderConfig).RuntimeClient, modified, original, current); err != nil {
+			log.Printf("[DEBUG] Received error: %#v", err)
+			return err
+		}
+		log.Printf("[INFO] Updated object: %#v", modified)
+
+		err = waitForReadyStatus(d, client, modified, d.Timeout(schema.TimeoutCreate))
+		if err != nil {
+			return err
+		}
 	}
 
-	original, err := contentToObject(originalData.(string))
-	if err != nil {
-		return err
-	}
-
-	objectNamespace := modified.GetNamespace()
-
-	if namespace == "" && objectNamespace == "" {
-		modified.SetNamespace("default")
-	} else if objectNamespace == "" {
-		// TODO: which namespace should have a higher precedence?
-		modified.SetNamespace(namespace)
-	}
-
-	objectKey, err := client.ObjectKeyFromObject(modified)
-	if err != nil {
-		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
-	}
-
-	current := modified.DeepCopy()
-
-	client := config.(*ProviderConfig).RuntimeClient
-
-	err = client.Get(context.Background(), objectKey, current)
-	if err != nil {
-		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
-	}
-
-	modified.SetResourceVersion(current.DeepCopy().GetResourceVersion())
-
-	current.SetResourceVersion("")
-	original.SetResourceVersion("")
-
-	if err := patch(config.(*ProviderConfig).RuntimeClient, modified, original, current); err != nil {
-		log.Printf("[DEBUG] Received error: %#v", err)
-		return err
-	}
-	log.Printf("[INFO] Updated object: %#v", modified)
-
-	return waitForReadyStatus(d, client, modified, d.Timeout(schema.TimeoutUpdate))
+	return resourceK8sManifestRead(d, config)
 }
 
 func resourceK8sManifestDelete(d *schema.ResourceData, config interface{}) error {
@@ -444,3 +497,75 @@ func contentToObject(content string) (*unstructured.Unstructured, error) {
 	}
 }
 
+func excludeIgnoreFields(ignoreFieldsRaw interface{}, content string) (string, error) {
+	var contentModified []byte
+	var ignoreFields []string
+
+	for _, j := range ignoreFieldsRaw.([]interface{}) {
+		ignoreFields = append(ignoreFields, j.(string))
+	}
+
+	for _, i := range ignoreFields {
+		query, err := gojq.Parse(fmt.Sprintf("del(%s)", i))
+		if err != nil {
+			log.Printf("[DEBUG] Received error: %#v", err)
+			return "", err
+		}
+
+		if len(contentModified) > 0 {
+			d, err := yaml2GoData(string(contentModified))
+			if err != nil {
+				log.Printf("[DEBUG] Received error: %#v", err)
+				return "", err
+			}
+
+			v, _ := query.Run(d).Next()
+			if err, ok := v.(error); ok {
+				log.Printf("[DEBUG] Received error: %#v", err)
+				return "", err
+			}
+
+			contentModified, err = gojq.Marshal(v)
+
+		} else {
+			d, err := yaml2GoData(content)
+			if err != nil {
+				log.Printf("[DEBUG] Received error: %#v", err)
+				return "", err
+			}
+
+			v, _ := query.Run(d).Next()
+			if err, ok := v.(error); ok {
+				log.Printf("[DEBUG] !!!Received error: %#v", err)
+				return "", err
+			}
+
+			contentModified, err = gojq.Marshal(v)
+		}
+
+		if err != nil {
+			log.Printf("[DEBUG] Received error from jq: %#v", err)
+		}
+	}
+	return string(contentModified), nil
+}
+
+func yaml2GoData(i string) (map[string]interface{}, error) {
+	var body map[string]interface{}
+	decoder := yaml.NewYAMLOrJSONDecoder(strings.NewReader(i), 4096)
+	err := decoder.Decode(&body)
+
+	return body, err
+}
+
+func json2Yaml(i string) (string, error) {
+	var body interface{}
+	err := json.Unmarshal([]byte(i), &body)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := goyaml.Marshal(body)
+
+	return string(data), err
+}
